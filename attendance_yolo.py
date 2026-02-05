@@ -1,50 +1,91 @@
 import time
+import os
 from datetime import datetime
 from ultralytics import YOLO
 import cv2
 
+# ==============================
 # Load YOLO model
+# ==============================
 model = YOLO("yolov8n.pt")
 
-# Attendance logic
-first_seen = {}      # person_id -> first detection time
+# ==============================
+# Attendance logic variables
+# ==============================
+first_seen = {}      # person_id -> first detection timestamp
 marked_ids = set()   # already marked attendance
-MIN_TIME = 5         # seconds
+status_text = {}     # person_id -> status string
+MIN_TIME = 5         # seconds required to mark attendance
 
-# Open camera
+# ==============================
+# Open webcam
+# ==============================
 cap = cv2.VideoCapture(0)
 
-# Create CSV header if not exists
-with open("attendance.csv", "a") as f:
-    f.write("Date,Person_ID,Time\n")
+# ==============================
+# Create CSV file with header (only once)
+# ==============================
+if not os.path.exists("attendance.csv"):
+    with open("attendance.csv", "w") as f:
+        f.write("Date,Person_ID,Time\n")
 
+print("🚀 AI Classroom Attendance System Started")
+print("Press 'q' to quit")
+
+# ==============================
+# Main loop
+# ==============================
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
+    # Run YOLO tracking
     results = model.track(frame, classes=[0], conf=0.5, persist=True)
 
     annotated = frame.copy()
+    current_time = time.time()
 
     for r in results:
         if r.boxes is None:
             continue
-
-        current_time = time.time()
 
         for box in r.boxes:
             person_id = int(box.id[0]) if box.id is not None else None
             if person_id is None:
                 continue
 
-            # First time detection
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+            # First detection time
             if person_id not in first_seen:
                 first_seen[person_id] = current_time
 
             duration = current_time - first_seen[person_id]
 
-            # Mark attendance after MIN_TIME
+            # Status logic
+            if duration < MIN_TIME:
+                status_text[person_id] = f"Detecting {int(duration)}s"
+                color = (0, 255, 255)  # Yellow
+            else:
+                status_text[person_id] = "Attendance Marked"
+                color = (0, 255, 0)    # Green
+
+            label = f"ID {person_id} | {status_text[person_id]}"
+
+            # Draw bounding box and label
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                annotated,
+                label,
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2
+            )
+
+            # Mark attendance only once
             if duration >= MIN_TIME and person_id not in marked_ids:
                 marked_ids.add(person_id)
 
@@ -58,13 +99,15 @@ while True:
 
                 print(f"✅ Attendance marked for ID {person_id}")
 
-        annotated = r.plot()
-
+    # Show output
     cv2.imshow("AI Attendance System", annotated)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
+# ==============================
+# Cleanup
+# ==============================
 cap.release()
 cv2.destroyAllWindows()
-
+print("🛑 System stopped")
