@@ -9,6 +9,8 @@ import cv2
 # ==============================
 model = YOLO("yolov8n.pt")
 
+prev_time = 0
+
 # ==============================
 # Attendance logic variables
 # ==============================
@@ -39,6 +41,10 @@ while True:
     ret, frame = cap.read()
     if not ret:
         break
+
+    curr_time = time.time()
+    fps = int(1 / (curr_time - prev_time)) if prev_time != 0 else 0
+    prev_time = curr_time
 
     # Run YOLO tracking
     results = model.track(frame, classes=[0], conf=0.5, persist=True)
@@ -100,6 +106,16 @@ while True:
                 print(f"✅ Attendance marked for ID {person_id}")
 
     # Show output
+    cv2.putText(
+    annotated,
+    f"FPS: {fps}",
+    (20, 40),
+    cv2.FONT_HERSHEY_SIMPLEX,
+    1,
+    (0, 255, 0),
+    2
+)
+
     cv2.imshow("AI Attendance System", annotated)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
