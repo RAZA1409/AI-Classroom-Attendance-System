@@ -191,6 +191,127 @@ git push -u origin main
 ✅ Resume-ready
 ✅ Upgrade-ready
 
+## 13. Phase-1 Final Implementation Summary (Completed)
+
+This section documents all Phase-1 features that were **actually implemented, tested, and committed** after the initial project setup.
+
+---
+
+### 13.1 Time-Based Attendance Confirmation
+
+- Attendance is marked **only if a person stays continuously for ≥ 5 seconds**
+- This prevents false positives caused by brief appearances or people passing in front of the camera
+- The timer starts from the first stable detection of a person
+
+**Design rationale:**  
+Attendance should depend on **temporal presence**, not a single-frame detection.
+
+---
+
+### 13.2 Stable Session-Level Person ID Mapping
+
+**Problem observed:**
+- YOLO tracking IDs can change when a person leaves and re-enters the camera frame
+
+**Solution implemented:**
+- Introduced a mapping from YOLO tracking IDs to **stable session-level Person IDs**
+- Each new YOLO ID is assigned a human-readable incremental ID (1, 2, 3…)
+
+**Important limitation (intentionally accepted):**
+- If a person leaves the frame and re-enters, they are treated as a **new person**
+- This is expected behavior for tracking-only systems
+- True identity persistence requires face recognition (planned in Phase-2)
+
+---
+
+### 13.3 Real-Time Visual Status Overlay
+
+Each detected person now displays live status information on the video feed:
+
+- `Detecting 1s`, `Detecting 2s`, etc. while below threshold
+- `Attendance Marked` once confirmed
+
+**Color coding:**
+- Yellow → detection in progress
+- Green → attendance confirmed
+
+This improves explainability and makes live demos much clearer.
+
+---
+
+### 13.4 FPS (Frames Per Second) Counter
+
+- A real-time FPS counter is displayed on the camera feed
+- Confirms that the system runs in **real time**
+- Helps evaluate performance when multiple people are present
+
+Typical observed FPS: **20–30 FPS** on GPU-enabled system.
+
+---
+
+### 13.5 Attendance Cooldown Logic (Tracking-Based)
+
+- A cooldown mechanism was added to prevent immediate duplicate attendance marking
+- Cooldown works **per session-level Person ID**
+
+**Clarification:**
+- Cooldown cannot prevent duplicates if the same person re-enters and receives a new tracking ID
+- This is a known limitation of tracking-based identity and is documented intentionally
+
+---
+
+### 13.6 CSV Logging Enhancements
+
+**Updated CSV structure:**
+
+Example:
+
+**Important design decision:**
+- `Duration` represents the **minimum confirmation time required** to mark attendance
+- It does NOT represent total time spent in front of the camera
+- This behavior is correct and intentional for Phase-1
+
+---
+
+## 14. Phase-1 Status (Final)
+
+Phase-1 is now **fully complete** with the following capabilities:
+
+- Real-time person detection and tracking
+- Stable session-level IDs
+- Time-based attendance validation
+- Visual feedback on camera feed
+- FPS performance monitoring
+- Structured CSV logging
+- Clean GitHub repository with proper commits
+
+**Project Level:**  
+Strong **Medium-Level** real-time AI project, suitable for internships and placement discussions.
+
+---
+
+## 15. Known Limitations (Documented)
+
+- Identity resets if a person exits and re-enters the frame
+- No name/roll-number mapping yet
+- CSV stores confirmation time, not total presence duration
+- Single-camera setup
+
+These are **not bugs** — they are planned upgrades.
+
+---
+
+## 16. Next Phase (Phase-2 Preview)
+
+Planned upgrades for Phase-2:
+
+- Face recognition for real identity persistence
+- Student name / roll number mapping
+- Database backend instead of CSV
+- Attendance analytics and reports
+- GUI / dashboard
+
+
 ---
 
 _End of notes. This file is the single source of truth for upgrading and maintaining the AI Classroom Attendance System._
