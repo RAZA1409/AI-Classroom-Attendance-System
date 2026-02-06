@@ -44,7 +44,7 @@ if not cap.isOpened():
 # ==============================
 if not os.path.exists("attendance.csv"):
     with open("attendance.csv", "w") as f:
-        f.write("Date,Person_ID,Time\n")
+        f.write("Date,Person_ID,Time,Duration,Status\n")
 
 print("🚀 AI Classroom Attendance System Started")
 print("Press 'q' to quit")
@@ -131,7 +131,9 @@ while True:
                     f.write(
                         f"{now.strftime('%Y-%m-%d')},"
                         f"{person_id},"
-                        f"{now.strftime('%H:%M:%S')}\n"
+                        f"{now.strftime('%H:%M:%S')},"
+                        f"{int(duration)}s,"
+                        f"Present\n"
                     )
 
                 print(f"✅ Attendance marked for ID {person_id}")
