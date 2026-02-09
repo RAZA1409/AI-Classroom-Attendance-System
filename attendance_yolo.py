@@ -16,6 +16,12 @@ id_map = {}          # YOLO_ID -> Stable Person_ID
 next_person_id = 1
 
 # ==============================
+# Track metadata (Phase-2)
+# ==============================
+track_meta = {}  # person_id -> tracking info
+TRACK_TIMEOUT = 2.0  # seconds (ID disappears if unseen)
+
+# ==============================
 # FPS variables
 # ==============================
 prev_time = 0
@@ -23,7 +29,7 @@ prev_time = 0
 # ==============================
 # Attendance logic variables
 # ==============================
-first_seen = {}      # person_id -> first detection timestamp
+# first_seen = {}      # person_id -> first detection timestamp
 marked_ids = set()   # already marked attendance
 status_text = {}     # person_id -> status string
 MIN_TIME = 5         # seconds required to mark attendance
@@ -80,21 +86,30 @@ while True:
             # Assign stable person ID
             if yolo_id not in id_map:
                 id_map[yolo_id] = next_person_id
+
+                track_meta[next_person_id] = {
+                    "first_seen": current_time,
+                    "last_seen": current_time,
+                    "frame_count": 1
+                }
+
                 next_person_id += 1
 
             person_id = id_map[yolo_id]
 
+            # Update tracking metadata
+            track_meta[person_id]["last_seen"] = current_time
+            track_meta[person_id]["frame_count"] += 1
+
             x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-            # First detection time
-            if person_id not in first_seen:
-                first_seen[person_id] = current_time
-
-            duration = current_time - first_seen[person_id]
+            #Duration using track_meta only
+            duration = current_time - track_meta[person_id]["first_seen"]
 
             # Status logic
             if duration < MIN_TIME:
-                status_text[person_id] = f"Detecting {int(duration)}s"
+                frames = track_meta[person_id]["frame_count"]
+                status_text[person_id] = f"Detecting {int(duration)}s | Frames: {frames}"
                 color = (0, 255, 255)  # Yellow
             else:
                 status_text[person_id] = "Attendance Marked"
@@ -138,6 +153,18 @@ while True:
 
                 print(f"✅ Attendance marked for ID {person_id}")
 
+    # ==============================
+    # Remove inactive tracks (STEP-5)
+    # ==============================
+    to_remove = []
+
+    for pid, meta in track_meta.items():
+        if current_time - meta["last_seen"] > TRACK_TIMEOUT:
+            to_remove.append(pid)
+
+    for pid in to_remove:
+        track_meta.pop(pid, None)
+    
     # Show FPS
     cv2.putText(
         annotated,
@@ -160,11 +187,5 @@ while True:
 cap.release()
 cv2.destroyAllWindows()
 print("🛑 System stopped")
-
-
-
-
-
-
 
 
