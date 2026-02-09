@@ -35,7 +35,7 @@ status_text = {}     # person_id -> status string
 MIN_TIME = 5         # seconds required to mark attendance
 COOLDOWN_TIME = 600  # seconds (10 minutes)
 last_marked_time = {}  # person_id -> last marked timestamp
-
+MIN_FRAMES = 110   # minimum stable frames required
 
 # ==============================
 # Open webcam
@@ -105,10 +105,10 @@ while True:
 
             #Duration using track_meta only
             duration = current_time - track_meta[person_id]["first_seen"]
+            frames = track_meta[person_id]["frame_count"]
 
             # Status logic
-            if duration < MIN_TIME:
-                frames = track_meta[person_id]["frame_count"]
+            if duration < MIN_TIME or frames < MIN_FRAMES:
                 status_text[person_id] = f"Detecting {int(duration)}s | Frames: {frames}"
                 color = (0, 255, 255)  # Yellow
             else:
@@ -138,7 +138,7 @@ while True:
             elif current_time - last_marked_time[person_id] >= COOLDOWN_TIME:
                 can_mark = True
 
-            if duration >= MIN_TIME and can_mark:
+            if duration >= MIN_TIME and frames >= MIN_FRAMES and can_mark:
                 marked_ids.add(person_id)
                 last_marked_time[person_id] = current_time
                 now = datetime.now()
