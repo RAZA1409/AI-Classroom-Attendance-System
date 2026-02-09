@@ -1,3 +1,4 @@
 attendance.csv
+attendance_old.csv
 *.pt
 __pycache__/
