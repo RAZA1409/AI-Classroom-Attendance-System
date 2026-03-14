@@ -2,17 +2,19 @@ import time
 import os
 from datetime import datetime
 from ultralytics import YOLO
-from deepface import DeepFace
-from face_database import load_student_database, recognize_face
+from face_database import load_database, recognize_face
 import cv2
+from collections import defaultdict
 
 # ==============================
 # Load YOLO model
 # ==============================
 model = YOLO("yolov8n.pt")
 
-# Load face database
-face_db = load_student_database("students")
+# ==============================
+# Load face database (cached embeddings)
+# ==============================
+face_db = load_database()
 
 # ==============================
 # Tracking structures
@@ -22,7 +24,6 @@ next_person_id = 1
 
 track_meta = {}
 person_names = {}
-from collections import defaultdict
 
 name_history = defaultdict(list)
 

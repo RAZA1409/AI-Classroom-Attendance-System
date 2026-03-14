@@ -1,5 +1,6 @@
 attendance.csv
 attendance_old.csv
+face_embeddings.pkl
 *.pt
 __pycache__/
 # Python virtual environment
