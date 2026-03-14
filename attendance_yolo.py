@@ -167,10 +167,11 @@ while True:
             frames = track_meta[person_id]["frame_count"]
 
             # run recognition periodically
-            if frames % 20 == 0:
+            if frames % 40 == 0:
 
                 try:
-                    face = frame[y1:y2, x1:x2]
+                    face = frame[max(0,y1):min(frame.shape[0],y2),
+                    max(0,x1):min(frame.shape[1],x2)]
                     predicted = recognize_face(face, face_db)
                 except:
                     predicted = "Unknown"
