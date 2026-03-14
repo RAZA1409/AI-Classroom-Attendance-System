@@ -3,12 +3,16 @@ import os
 from datetime import datetime
 from ultralytics import YOLO
 from deepface import DeepFace
+from face_database import load_student_database, recognize_face
 import cv2
 
 # ==============================
 # Load YOLO model
 # ==============================
 model = YOLO("yolov8n.pt")
+
+# Load face database
+face_db = load_student_database("students")
 
 # ==============================
 # Tracking structures
@@ -18,6 +22,9 @@ next_person_id = 1
 
 track_meta = {}
 person_names = {}
+from collections import defaultdict
+
+name_history = defaultdict(list)
 
 TRACK_TIMEOUT = 2.0
 
@@ -123,8 +130,16 @@ while True:
             # ==============================
             # Update tracking info
             # ==============================
-            track_meta[person_id]["last_seen"] = current_time
-            track_meta[person_id]["frame_count"] += 1
+            if person_id not in track_meta:
+                track_meta[person_id] = {
+                    "first_seen": current_time,
+                    "last_seen": current_time,
+                    "frame_count": 1
+                }
+            else:
+                track_meta[person_id]["last_seen"] = current_time
+                track_meta[person_id]["frame_count"] += 1
+            
 
             x1,y1,x2,y2 = map(int,box.xyxy[0])
 
@@ -146,41 +161,32 @@ while True:
             track_meta[person_id]["prev_box"] = (x1,y1,x2,y2)
 
             # ==============================
-            # FACE RECOGNITION (ONLY ONCE)
+            # FACE RECOGNITION (PERIODIC)
             # ==============================
-            if person_id not in person_names:
+
+            frames = track_meta[person_id]["frame_count"]
+
+            # run recognition periodically
+            if frames % 20 == 0:
 
                 try:
-
                     face = frame[y1:y2, x1:x2]
-
-                    result = DeepFace.find(
-                        img_path=face,
-                        db_path="students",
-                        enforce_detection=False,
-                        silent=True
-                    )
-
-                    if len(result[0]) > 0:
-
-                        best = result[0].iloc[0]
-                        distance = best["distance"]
-
-                        if distance < 0.6:
-                            identity = best["identity"]
-                            name = os.path.basename(identity).split(".")[0]
-                        else:
-                            name = "Unknown"
-
-                    else:
-                        name = "Unknown"
-
+                    predicted = recognize_face(face, face_db)
                 except:
-                    name = "Unknown"
+                    predicted = "Unknown"
 
-                person_names[person_id] = name
+                name_history[person_id].append(predicted)
 
-            name = person_names.get(person_id,"Unknown")
+                # keep last 5 predictions
+                if len(name_history[person_id]) > 5:
+                    name_history[person_id].pop(0)
+
+                 # majority vote
+                final_name = max(set(name_history[person_id]), key=name_history[person_id].count)
+
+                person_names[person_id] = final_name
+
+            name = person_names.get(person_id, "Detecting...")
 
             # ==============================
             # Attendance timing
@@ -226,7 +232,7 @@ while True:
             elif current_time-last_marked_time[person_id] >= COOLDOWN_TIME:
                 can_mark=True
 
-            if duration>=MIN_TIME and frames>=MIN_FRAMES and can_mark:
+            if duration>=MIN_TIME and frames>=MIN_FRAMES and can_mark and name != "Unknown":
 
                 last_marked_time[person_id]=current_time
 
