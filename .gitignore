@@ -2,3 +2,20 @@ attendance.csv
 attendance_old.csv
 *.pt
 __pycache__/
+# Python virtual environment
+ai_env/
+venv/
+
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# VSCode
+.vscode/
+students/*.jpg
+students/*.jpeg
+students/*.png

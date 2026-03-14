@@ -2,6 +2,7 @@ import time
 import os
 from datetime import datetime
 from ultralytics import YOLO
+from deepface import DeepFace
 import cv2
 
 # ==============================
@@ -10,16 +11,27 @@ import cv2
 model = YOLO("yolov8n.pt")
 
 # ==============================
-# Stable ID mapping
+# Tracking structures
 # ==============================
-id_map = {}          # YOLO_ID -> Stable Person_ID
+id_map = {}
 next_person_id = 1
 
+track_meta = {}
+person_names = {}
+
+TRACK_TIMEOUT = 2.0
+
 # ==============================
-# Track metadata (Phase-2)
+# Attendance variables
 # ==============================
-track_meta = {}  # person_id -> tracking info
-TRACK_TIMEOUT = 2.0  # seconds (ID disappears if unseen)
+marked_ids = set()
+status_text = {}
+
+MIN_TIME = 5
+MIN_FRAMES = 100
+COOLDOWN_TIME = 600
+
+last_marked_time = {}
 
 # ==============================
 # FPS variables
@@ -27,64 +39,75 @@ TRACK_TIMEOUT = 2.0  # seconds (ID disappears if unseen)
 prev_time = 0
 
 # ==============================
-# Attendance logic variables
-# ==============================
-# first_seen = {}      # person_id -> first detection timestamp
-marked_ids = set()   # already marked attendance
-status_text = {}     # person_id -> status string
-MIN_TIME = 5         # seconds required to mark attendance
-COOLDOWN_TIME = 600  # seconds (10 minutes)
-last_marked_time = {}  # person_id -> last marked timestamp
-MIN_FRAMES = 110   # minimum stable frames required
-
-# ==============================
 # Open webcam
 # ==============================
 cap = cv2.VideoCapture(0)
+
 if not cap.isOpened():
     print("❌ Camera not accessible")
     exit()
 
 # ==============================
-# Create CSV file with header
+# CSV file
 # ==============================
 if not os.path.exists("attendance.csv"):
     with open("attendance.csv", "w") as f:
-        f.write("Date,Person_ID,Time,Duration,Status\n")
+        f.write("Date,Name,Time,Duration,Status\n")
 
 print("🚀 AI Classroom Attendance System Started")
 print("Press 'q' to quit")
 
 # ==============================
-# Main loop
+# MAIN LOOP
 # ==============================
 while True:
+
     ret, frame = cap.read()
     if not ret:
         break
 
+    # Resize frame (increase FPS)
+    frame = cv2.resize(frame, (640,480))
+
+    # ==============================
     # FPS calculation
+    # ==============================
     curr_time = time.time()
-    fps = int(1 / (curr_time - prev_time)) if prev_time != 0 else 0
+    fps = int(1/(curr_time-prev_time)) if prev_time!=0 else 0
     prev_time = curr_time
 
-    # Run YOLO tracking
-    results = model.track(frame, classes=[0], conf=0.5, persist=True)
+    # ==============================
+    # YOLO tracking
+    # ==============================
+    results = model.track(
+        frame,
+        classes=[0],
+        conf=0.5,
+        persist=True,
+        tracker="bytetrack.yaml",
+        verbose=False
+    )
 
     annotated = frame.copy()
     current_time = time.time()
 
     for r in results:
+
         if r.boxes is None:
             continue
 
         for box in r.boxes:
-            yolo_id = int(box.id[0]) if box.id is not None else None
-            if yolo_id is None:
+
+            if box.id is None:
                 continue
 
-            # Assign stable person ID
+            yolo_id = int(box.id[0])
+
+            # ==============================
+            # Assign stable ID
+            # ==============================
             if yolo_id not in id_map:
+
                 id_map[yolo_id] = next_person_id
 
                 track_meta[next_person_id] = {
@@ -97,95 +120,167 @@ while True:
 
             person_id = id_map[yolo_id]
 
-            # Update tracking metadata
+            # ==============================
+            # Update tracking info
+            # ==============================
             track_meta[person_id]["last_seen"] = current_time
             track_meta[person_id]["frame_count"] += 1
 
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            x1,y1,x2,y2 = map(int,box.xyxy[0])
 
-            #Duration using track_meta only
-            duration = current_time - track_meta[person_id]["first_seen"]
+            # ==============================
+            # Smooth bounding box
+            # ==============================
+            alpha = 0.8
+
+            if "prev_box" not in track_meta[person_id]:
+                track_meta[person_id]["prev_box"] = (x1,y1,x2,y2)
+
+            px1,py1,px2,py2 = track_meta[person_id]["prev_box"]
+
+            x1 = int(alpha*px1 + (1-alpha)*x1)
+            y1 = int(alpha*py1 + (1-alpha)*y1)
+            x2 = int(alpha*px2 + (1-alpha)*x2)
+            y2 = int(alpha*py2 + (1-alpha)*y2)
+
+            track_meta[person_id]["prev_box"] = (x1,y1,x2,y2)
+
+            # ==============================
+            # FACE RECOGNITION (ONLY ONCE)
+            # ==============================
+            if person_id not in person_names:
+
+                try:
+
+                    face = frame[y1:y2, x1:x2]
+
+                    result = DeepFace.find(
+                        img_path=face,
+                        db_path="students",
+                        enforce_detection=False,
+                        silent=True
+                    )
+
+                    if len(result[0]) > 0:
+
+                        best = result[0].iloc[0]
+                        distance = best["distance"]
+
+                        if distance < 0.6:
+                            identity = best["identity"]
+                            name = os.path.basename(identity).split(".")[0]
+                        else:
+                            name = "Unknown"
+
+                    else:
+                        name = "Unknown"
+
+                except:
+                    name = "Unknown"
+
+                person_names[person_id] = name
+
+            name = person_names.get(person_id,"Unknown")
+
+            # ==============================
+            # Attendance timing
+            # ==============================
+            duration = current_time-track_meta[person_id]["first_seen"]
             frames = track_meta[person_id]["frame_count"]
 
-            # Status logic
             if duration < MIN_TIME or frames < MIN_FRAMES:
-                status_text[person_id] = f"Detecting {int(duration)}s | Frames: {frames}"
-                color = (0, 255, 255)  # Yellow
+
+                status_text[person_id] = f"Detecting {int(duration)}s"
+                color = (0,255,255)
+
             else:
+
                 status_text[person_id] = "Attendance Marked"
-                color = (0, 255, 0)    # Green
+                color = (0,255,0)
 
-            label = f"ID {person_id} | {status_text[person_id]}"
+            label = f"{name} | {status_text[person_id]}"
 
-            # Draw bounding box and label
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            # ==============================
+            # Draw box
+            # ==============================
+            cv2.rectangle(annotated,(x1,y1),(x2,y2),color,2)
+
             cv2.putText(
                 annotated,
                 label,
-                (x1, y1 - 10),
+                (x1,y1-10),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
+                0.7,
                 color,
                 2
             )
 
-            # Mark attendance only once
-            # if duration >= MIN_TIME and person_id not in marked_ids:
-            can_mark = False
+            # ==============================
+            # Attendance marking
+            # ==============================
+            can_mark=False
 
             if person_id not in last_marked_time:
-                can_mark = True
-            elif current_time - last_marked_time[person_id] >= COOLDOWN_TIME:
-                can_mark = True
+                can_mark=True
 
-            if duration >= MIN_TIME and frames >= MIN_FRAMES and can_mark:
-                marked_ids.add(person_id)
-                last_marked_time[person_id] = current_time
-                now = datetime.now()
-                with open("attendance.csv", "a") as f:
+            elif current_time-last_marked_time[person_id] >= COOLDOWN_TIME:
+                can_mark=True
+
+            if duration>=MIN_TIME and frames>=MIN_FRAMES and can_mark:
+
+                last_marked_time[person_id]=current_time
+
+                now=datetime.now()
+
+                with open("attendance.csv","a") as f:
+
                     f.write(
                         f"{now.strftime('%Y-%m-%d')},"
-                        f"{person_id},"
+                        f"{name},"
                         f"{now.strftime('%H:%M:%S')},"
                         f"{int(duration)}s,"
                         f"Present\n"
                     )
 
-                print(f"✅ Attendance marked for ID {person_id}")
+                print(f"✅ Attendance marked for {name}")
 
     # ==============================
-    # Remove inactive tracks (STEP-5)
+    # Remove inactive tracks
     # ==============================
-    to_remove = []
+    remove_ids=[]
 
-    for pid, meta in track_meta.items():
-        if current_time - meta["last_seen"] > TRACK_TIMEOUT:
-            to_remove.append(pid)
+    for pid,meta in track_meta.items():
 
-    for pid in to_remove:
-        track_meta.pop(pid, None)
-    
+        if current_time-meta["last_seen"]>TRACK_TIMEOUT:
+            remove_ids.append(pid)
+
+    for pid in remove_ids:
+
+        track_meta.pop(pid,None)
+        person_names.pop(pid,None)
+
+    # ==============================
     # Show FPS
+    # ==============================
     cv2.putText(
         annotated,
         f"FPS: {fps}",
-        (20, 40),
+        (20,40),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
-        (0, 255, 0),
+        (0,255,0),
         2
     )
 
-    cv2.imshow("AI Attendance System", annotated)
+    cv2.imshow("AI Attendance System",annotated)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.waitKey(1)&0xFF==ord('q'):
         break
 
 # ==============================
-# Cleanup
+# CLEANUP
 # ==============================
 cap.release()
 cv2.destroyAllWindows()
+
 print("🛑 System stopped")
-
-
