@@ -1,22 +1,93 @@
-attendance.csv
-attendance_old.csv
+# ==========================================
+# AI Classroom Attendance System - .gitignore
+# ==========================================
+
+# --- Biometric Data & Student Datasets ---
+# Exclude all student photos and enrolled directories
+students/*
+!students/.gitkeep
+!students/README.md
+students/**/*.jpg
+students/**/*.jpeg
+students/**/*.png
+students/**/*.bmp
+students/**/*.webp
+
+# Biometric embeddings & model caches
+*.pkl
+*.pickle
 face_embeddings.pkl
+face_embeddings.pkl.tmp
+students/*.pkl
+students/**/*.pkl
+
+# --- Attendance Records & Data Exports ---
+*.csv
+!sample_*.csv
+attendance.csv
+attendance_*.csv
+attendance_old.csv
+reports/
+exports/
+
+# --- Deep Learning Models & Weights ---
 *.pt
-__pycache__/
-# Python virtual environment
+*.pth
+*.onnx
+*.engine
+*.weights
+*.h5
+*.tflite
+yolov8n.pt
+models/
+
+# --- Environment & Secrets ---
+.env
+.env.*
+!.env.example
+secrets/
+*.secret
+*.key
+*.pem
+
+# --- Python Environment & Caches ---
 ai_env/
 venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
 
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Logs
+# --- Logs & Temp Files ---
 *.log
+logs/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
 
-# VSCode
+# --- OS & Editor Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
 .vscode/
-students/*.jpg
-students/*.jpeg
-students/*.png
+.idea/
+*.sublime-project
+*.sublime-workspace

@@ -1,5 +1,6 @@
 import time
 import os
+import csv
 from datetime import datetime
 from ultralytics import YOLO
 from face_database import load_database, recognize_face
@@ -15,6 +16,9 @@ model = YOLO("yolov8n.pt")
 # Load face database (cached embeddings)
 # ==============================
 face_db = load_database()
+if not face_db:
+    print("⚠️ Warning: Face database is empty or not found. Face recognition will classify all faces as 'Unknown'.")
+
 
 # ==============================
 # Tracking structures
@@ -58,9 +62,10 @@ if not cap.isOpened():
 # ==============================
 # CSV file
 # ==============================
-if not os.path.exists("attendance.csv"):
-    with open("attendance.csv", "w") as f:
-        f.write("Date,Name,Time,Duration,Status\n")
+if not os.path.exists("attendance.csv") or os.path.getsize("attendance.csv") == 0:
+    with open("attendance.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Date", "Name", "Time", "Duration", "Status"])
 
 print("🚀 AI Classroom Attendance System Started")
 print("Press 'q' to quit")
@@ -240,15 +245,15 @@ while True:
 
                 now=datetime.now()
 
-                with open("attendance.csv","a") as f:
-
-                    f.write(
-                        f"{now.strftime('%Y-%m-%d')},"
-                        f"{name},"
-                        f"{now.strftime('%H:%M:%S')},"
-                        f"{int(duration)}s,"
-                        f"Present\n"
-                    )
+                with open("attendance.csv", "a", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        now.strftime('%Y-%m-%d'),
+                        name,
+                        now.strftime('%H:%M:%S'),
+                        f"{int(duration)}s",
+                        "Present"
+                    ])
 
                 print(f"✅ Attendance marked for {name}")
 
