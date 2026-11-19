@@ -311,8 +311,54 @@ Planned upgrades for Phase-2:
 - Attendance analytics and reports
 - GUI / dashboard
 
+---
+
+## 17. Phase-2 Implementation Summary: Attendance Correctness & Deduplication (Completed)
+
+This section documents the Phase-2 attendance correctness, deduplication, and data integrity implementation.
+
+### 17.1 CSV Schema Migration & Rectangular Integrity
+- **Standardized 6-Column Schema:** Every attendance file uses:
+  `Date,Name,Time,Duration,Status,Session_ID`
+- **Safe Legacy Migration:** When an existing file with the legacy 5-column header is detected:
+  1. A backup copy is saved at `<csv_path>.bak` before modification.
+  2. The 6-column header is written.
+  3. Every existing record is preserved with its original values and backfilled with an empty string `""` for `Session_ID`.
+  4. Migration is performed using a temporary file and atomic replacement (`os.replace`).
+- **Compatibility Verified:** Full rectangular compatibility verified against Python `csv.reader`, `csv.DictReader`, and `pandas.read_csv()`.
+
+### 17.2 Session Recovery Across Application Restarts
+- **Resolution Priority:**
+  1. **Explicit Session ID:** Supplied via `ATTENDANCE_SESSION_ID` or constructor parameter (always takes precedence).
+  2. **Active Session Marker (`.active_session.json`):** If no explicit ID is given, the system inspects the local marker file. If it contains a valid `session_id` active within the configured recovery window (default: **60 minutes**), the ongoing session is automatically resumed.
+  3. **New Session ID Generation:** If the marker is missing, corrupted, or older than 60 minutes, a new ID is generated: `session_YYYYMMDD_HHMMSS`.
+- **Atomic Heartbeat:** The marker is updated with the latest active timestamp while the application runs.
+- **Privacy & Cleanliness:** Contains zero personal or biometric data and is strictly excluded via `.gitignore`.
+- **Known Limitation:** A restart occurring after the 60-minute recovery window has elapsed will generate a new session ID unless `ATTENDANCE_SESSION_ID` is explicitly supplied. Automatic recovery cannot independently infer class timetable boundaries.
+
+### 17.3 Presence Duration Timing & Anti-Inflation Gap Policy
+- **Maximum Frame Gap (`max_frame_gap` = 0.25s):**
+  - For normal consecutive frames ($0 < dt \le 0.25\text{s}$), measured $dt$ accumulates towards presence duration.
+  - When $dt > 0.25\text{s}$ (e.g. 2.5-second camera freeze, frame drop, or student temporarily stepping away), the missing gap is **NOT** credited towards presence. Accumulation pauses and safely resumes from the next valid detection.
+  - Negative or repeated timestamps ($dt \le 0$) caused by system clock adjustments are ignored and cannot corrupt or reduce duration.
+  - First frame observation initializes tracking with `total_seconds = 0.0` (does not count as an artificial elapsed interval).
+
+### 17.4 Production Eligibility Requirements
+- A student is eligible for attendance if and only if **BOTH** production thresholds are satisfied:
+  1. `min_time_seconds` $\ge$ **5.0 seconds** of actual presence.
+  2. `min_frames` $\ge$ **100 qualifying frames**.
+- Satisfying only duration or only frame count will reject attendance.
+- Identity must be classified as a known student (`name not in ("Unknown", "Detecting...", "")`).
+
+### 17.5 Identity Normalization & Collision Safeguards
+- **Canonical Normalization (`normalize_student_name`):** Normalizes surrounding whitespace and lowercases string (`"Raza"` and `"raza"` map to `"raza"`).
+- **Case-Insensitive Deduplication:** Enforces `(normalize_student_name(student_name), session_id)` in memory and CSV lookups while preserving original casing for CSV display.
+- **Enrollment Validation:**
+  - Requires at least one alphanumeric character (rejects symbol-only names like `///`).
+  - Detects case-insensitive collisions against existing student directories.
+  - Automatically offsets capture indices (`max(existing) + 1`), guaranteeing zero silent file overwrites.
+- **Remaining Limitation:** Student identity currently relies on student names. If two different students share the same name (e.g. "Rahul"), roll numbers or unique student IDs will be required in future phases.
 
 ---
 
 _End of notes. This file is the single source of truth for upgrading and maintaining the AI Classroom Attendance System._
-

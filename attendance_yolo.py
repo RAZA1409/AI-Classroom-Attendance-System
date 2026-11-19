@@ -6,6 +6,7 @@ from ultralytics import YOLO
 from face_database import load_database, recognize_face
 import cv2
 from collections import defaultdict
+from attendance_manager import AttendanceManager
 
 # ==============================
 # Load YOLO model
@@ -34,16 +35,15 @@ name_history = defaultdict(list)
 TRACK_TIMEOUT = 2.0
 
 # ==============================
-# Attendance variables
+# Attendance Manager
 # ==============================
-marked_ids = set()
-status_text = {}
-
-MIN_TIME = 5
-MIN_FRAMES = 100
-COOLDOWN_TIME = 600
-
-last_marked_time = {}
+session_id = os.getenv("ATTENDANCE_SESSION_ID")
+attendance_mgr = AttendanceManager(
+    csv_path="attendance.csv",
+    session_id=session_id,
+    min_time_seconds=5.0,
+    min_frames=100,
+)
 
 # ==============================
 # FPS variables
@@ -59,15 +59,8 @@ if not cap.isOpened():
     print("❌ Camera not accessible")
     exit()
 
-# ==============================
-# CSV file
-# ==============================
-if not os.path.exists("attendance.csv") or os.path.getsize("attendance.csv") == 0:
-    with open("attendance.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Date", "Name", "Time", "Duration", "Status"])
-
 print("🚀 AI Classroom Attendance System Started")
+print(f"Session ID: {attendance_mgr.session_id}")
 print("Press 'q' to quit")
 
 # ==============================
@@ -196,81 +189,48 @@ while True:
             name = person_names.get(person_id, "Detecting...")
 
             # ==============================
-            # Attendance timing
+            # Attendance & Presence Evaluation
             # ==============================
-            duration = current_time-track_meta[person_id]["first_seen"]
-            frames = track_meta[person_id]["frame_count"]
-
-            if duration < MIN_TIME or frames < MIN_FRAMES:
-
-                status_text[person_id] = f"Detecting {int(duration)}s"
-                color = (0,255,255)
-
+            if name not in ("Unknown", "Detecting..."):
+                is_marked, status = attendance_mgr.update_presence(name, current_time)
+                color = (0, 255, 0) if is_marked else (0, 255, 255)
+            elif name == "Unknown":
+                status = "Unknown"
+                color = (0, 0, 255)
             else:
+                status = "Detecting..."
+                color = (0, 255, 255)
 
-                status_text[person_id] = "Attendance Marked"
-                color = (0,255,0)
-
-            label = f"{name} | {status_text[person_id]}"
+            label = f"{name} | {status}"
 
             # ==============================
             # Draw box
             # ==============================
-            cv2.rectangle(annotated,(x1,y1),(x2,y2),color,2)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
             cv2.putText(
                 annotated,
                 label,
-                (x1,y1-10),
+                (x1, y1 - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 color,
                 2
             )
 
-            # ==============================
-            # Attendance marking
-            # ==============================
-            can_mark=False
-
-            if person_id not in last_marked_time:
-                can_mark=True
-
-            elif current_time-last_marked_time[person_id] >= COOLDOWN_TIME:
-                can_mark=True
-
-            if duration>=MIN_TIME and frames>=MIN_FRAMES and can_mark and name != "Unknown":
-
-                last_marked_time[person_id]=current_time
-
-                now=datetime.now()
-
-                with open("attendance.csv", "a", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        now.strftime('%Y-%m-%d'),
-                        name,
-                        now.strftime('%H:%M:%S'),
-                        f"{int(duration)}s",
-                        "Present"
-                    ])
-
-                print(f"✅ Attendance marked for {name}")
-
     # ==============================
     # Remove inactive tracks
     # ==============================
-    remove_ids=[]
+    remove_ids = []
 
-    for pid,meta in track_meta.items():
-
-        if current_time-meta["last_seen"]>TRACK_TIMEOUT:
+    for pid, meta in track_meta.items():
+        if current_time - meta["last_seen"] > TRACK_TIMEOUT:
             remove_ids.append(pid)
 
     for pid in remove_ids:
-
-        track_meta.pop(pid,None)
-        person_names.pop(pid,None)
+        track_meta.pop(pid, None)
+        person_names.pop(pid, None)
+        name_history.pop(pid, None)
 
     # ==============================
     # Show FPS

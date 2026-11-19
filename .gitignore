@@ -41,6 +41,11 @@ exports/
 yolov8n.pt
 models/
 
+# --- Session State ---
+.active_session.json
+*.session.json
+.session_*.tmp
+
 # --- Environment & Secrets ---
 .env
 .env.*
