@@ -361,4 +361,86 @@ This section documents the Phase-2 attendance correctness, deduplication, and da
 
 ---
 
+## 18. Phase-3 Implementation Summary: Recognition Pipeline, Reliability & Runtime Stability (Completed)
+
+This section documents the Phase-3 reliability, face detection pipeline, and runtime stability enhancements.
+
+### 18.1 Face Detection & Alignment Pipeline
+- **Dedicated Face Detection Before Embedding:**
+  The live pipeline previously passed full-body person bounding boxes to FaceNet512 with `enforce_detection=False`. In Phase-3:
+  1. A genuine face detector (`DeepFace.extract_faces` with `enforce_detection=True`) is executed inside the person bounding box.
+  2. The detected face region is isolated and aligned before embedding extraction.
+  3. Cases where no face is detected are strictly rejected and classified as `"Unknown"`.
+  4. Multiple faces detected within a single person bounding box are treated conservatively as ambiguous and rejected to avoid false identity assignment.
+- **Configurable Face Quality Validation:**
+  Pre-recognition filters reject degraded inputs before reaching FaceNet512:
+  - **Minimum Face Dimensions:** Faces below `MIN_FACE_WIDTH` (40px) or `MIN_FACE_HEIGHT` (40px) are rejected.
+  - **Blur Detection (Laplacian Variance):** Face images with Laplacian variance beneath `BLUR_THRESHOLD` (30.0) are rejected as blurry.
+
+### 18.2 Raw vs. Smoothed Coordinates Architecture
+- **Coordinate Separation in `attendance_yolo.py`:**
+  - **Raw Coordinates (`rx1, ry1, rx2, ry2`):** Directly extracted from YOLO `box.xyxy[0]` and clamped to frame boundaries. Used exclusively for face recognition cropping, eliminating the spatial lag caused by display smoothing.
+  - **Smoothed Coordinates (`sx1, sy1, sx2, sy2`):** Computed via Exponential Moving Average (EMA, `alpha = 0.8`) and used exclusively for on-screen bounding box and text rendering (`cv2.rectangle`).
+  - **Zero-Area Protection:** All bounding boxes are verified with `rx2 > rx1` and `ry2 > ry1` before slicing.
+
+### 18.3 Centralized Configuration (`config.py`)
+All hardcoded parameters across modules are centralized in `config.py` with dynamic `os.getenv` overrides:
+- `CAMERA_INDEX` (default: 0)
+- `FRAME_WIDTH`, `FRAME_HEIGHT` (640x480)
+- `YOLO_MODEL_PATH` ("yolov8n.pt"), `YOLO_CONF` (0.5), `YOLO_TRACKER` ("bytetrack.yaml")
+- `FACE_DETECTOR_BACKEND` ("opencv"), `FACE_RECOGNITION_MODEL` ("Facenet512")
+- `RECOGNITION_THRESHOLD` (0.6), `RECOGNITION_INTERVAL` (40 frames), `VOTING_WINDOW_SIZE` (5 frames)
+- `MIN_FACE_WIDTH` (40), `MIN_FACE_HEIGHT` (40), `BLUR_THRESHOLD` (30.0)
+- `MIN_TIME_SECONDS` (5.0s), `MIN_FRAMES` (100), `MAX_FRAME_GAP_SECONDS` (0.25s)
+- `CSV_PATH`, `DATABASE_PATH`, `SESSION_MARKER_PATH`, `STUDENTS_DIR`, `LOG_DIR`, `LOG_LEVEL`
+
+### 18.4 Structured Logging System (`logger.py`)
+- Python's standard `logging` module (`logger.py`) handles all internal diagnostic events, debugging, warnings, and errors with formatted timestamps, log levels (`INFO`, `WARNING`, `ERROR`, `DEBUG`), console streaming, and a bounded `RotatingFileHandler` (`logs/attendance.log`, max 5 MB, 3 backups).
+- **Distinction Between Diagnostic Logging and User Messages:** User-facing interactive console messages (e.g. startup banners, operational session IDs, CLI completion indicators, and user prompts) use clean standard console output without diagnostic prefixes or timestamps, distinguishing operational user messaging from internal diagnostic logs.
+- Strict privacy adherence: zero biometric embeddings, student photographs, or sensitive PII are logged or printed.
+
+### 18.5 Missing-File Handling & Preflight Safety
+- **YOLO Model Check:** `attendance_yolo.py` checks `os.path.exists(config.YOLO_MODEL_PATH)` before initializing YOLO, preventing unexpected network downloads when weights are missing locally.
+- **Missing Embeddings:** `load_database()` logs an explicit warning and classification defaults to `"Unknown"` without crashing.
+- **Camera Failures:** Gracefully handles camera open errors and broken frame streams with clean resource release.
+
+### 18.6 Tracking Memory Cleanup & ID Reuse Safeguards
+- Fixed unbounded growth of `id_map`: when an inactive track exceeds `TRACK_TIMEOUT` (2.0s), its reverse entries in `id_map` are purged alongside `track_meta`, `person_names`, `name_history`, and `smoothed_boxes`.
+- Recycled YOLO tracker IDs emitted by ByteTrack cannot inherit stale student identities.
+- Extracted production tracker assignment helper (`assign_or_update_track()`) ensures accurate single-frame increment and clean initialization.
+
+### 18.7 Safe Database Rebuild Procedure
+- `build_face_database.py` was unified with the live pipeline's face detection and quality check logic.
+- **Fail-Closed Database Inspection & Safe Rebuild Guarantees:**
+  1. **Fail-Closed Inspection:** Before rebuilding, if an existing, non-empty `face_embeddings.pkl` is detected, it is strictly validated:
+     - If the file cannot be unpickled or is corrupted, rebuild immediately aborts (`return False`).
+     - If the unpickled object is not a dictionary, rebuild immediately aborts (`return False`).
+     - If any existing enrolled identity key has no corresponding folder on disk, rebuild immediately aborts (`return False`) and reports an aggregate count without logging student names.
+     - In all failure scenarios, the original database is preserved byte-for-byte, no backup is created, and no temporary files or replacements occur.
+  2. **Empty Folder Protection:** If any student folder contains zero supported image files (`.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`), the rebuild immediately aborts and preserves the existing database byte-for-byte.
+  3. **Partial Replacement Protection:** If any student folder contains images but produces zero valid embeddings, replacement is aborted to prevent partial database corruption.
+  4. **Student Photograph Protection:** Student photographs in `students/` are never deleted or modified.
+  5. **Collision-Free Backup:** If `face_embeddings.pkl` already exists and all checks succeed, a safe, collision-free timestamped backup (`face_embeddings.pkl.bak.<timestamp>` or `<path>.bak.<ts>_N`) is created before replacement.
+  6. **Atomic Replacement:** The new database is written to a temporary file (`.face_embeddings.pkl.tmp`) and atomically swapped via `os.replace`.
+- **Rebuild Command:**
+  ```powershell
+  & "ai_env\Scripts\python.exe" build_face_database.py
+  ```
+
+### 18.8 Test Verification & Execution Commands
+Comprehensive headless unit test suite covering all Phase 2 and Phase 3 requirements:
+```powershell
+& "ai_env\Scripts\python.exe" -m unittest discover -s tests -p "test_*.py" -v
+```
+- **Phase 2 (`test_attendance.py`):** 17 tests verifying CSV schema migration, presence duration timing, session recovery, and deduplication.
+- **Phase 3 (`test_recognition.py`):** 25 tests (27 tests including focused fail-closed database inspection regression tests) verifying face detection, quality filtering, coordinate separation, tracker cleanup, config overrides, production tracker identity assignment helper, empty folder protection, and fail-closed database inspection.
+- **Total:** 42 tests (44 tests including fail-closed regression tests), 0 failures, 0 errors.
+
+### 18.9 Known Limitations & Technical Roadmap
+- Face recognition accuracy depends on lighting conditions and angle; students wearing heavy masks or extreme head tilts (> 45°) will be rejected by the quality gate.
+- Single-camera setup remains; multi-camera synchronization is slated for future phases.
+- Concurrent process file locking is not implemented; attendance should run from a single camera process per classroom.
+
+---
+
 _End of notes. This file is the single source of truth for upgrading and maintaining the AI Classroom Attendance System._
